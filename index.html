@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF-Rechnungsauswertung – Artikel pro Monat</title>
+<link rel="stylesheet" href="styles.css">
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/pdf.worker.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>PDF-Rechnungsauswertung</h1>
+  <p class="subtitle">Bis zu 200 PDFs hochladen – Artikelnummern werden erkannt und pro Monat aufsummiert. Alle Daten bleiben lokal im Browser, nichts wird hochgeladen.</p>
+</header>
+
+<main>
+  <!-- Upload-Bereich -->
+  <section id="dropzone" class="dropzone">
+    <div class="dropzone-inner">
+      <div class="dropzone-icon">&#128196;</div>
+      <p><strong>PDFs hierher ziehen</strong> oder</p>
+      <label class="btn btn-primary">
+        Dateien auswählen
+        <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
+      </label>
+      <p class="hint">Bis zu 200 PDF-Dateien gleichzeitig</p>
+    </div>
+  </section>
+
+  <!-- Einstellungen -->
+  <details class="settings" open>
+    <summary>Erkennungs-Einstellungen</summary>
+    <div class="settings-body">
+      <div class="field">
+        <label for="presetSelect">Vorlage für Positionserkennung</label>
+        <select id="presetSelect"></select>
+      </div>
+      <div class="field">
+        <label for="lineRegex">Zeilen-Muster (regulärer Ausdruck mit Gruppen <code>artikel</code> und <code>menge</code>)</label>
+        <input type="text" id="lineRegex" spellcheck="false">
+        <p class="hint">Wird auf jede Textzeile der PDFs angewendet. Die Gruppe <code>(?&lt;artikel&gt;…)</code> liefert die Artikelnummer, <code>(?&lt;menge&gt;…)</code> die Menge. Fehlt die Mengen-Gruppe, zählt jeder Treffer als 1.</p>
+        <p class="hint error" id="regexError" hidden></p>
+      </div>
+      <div class="field">
+        <label for="dateKeywords">Datums-Schlüsselwörter (Priorität bei der Monatszuordnung)</label>
+        <input type="text" id="dateKeywords" value="Rechnungsdatum, Belegdatum, Leistungsdatum, Rechnung vom, Datum">
+        <p class="hint">Es wird zuerst nach einem Datum neben diesen Begriffen gesucht; sonst gilt das erste gefundene Datum im Dokument. Unterstützte Formate: 31.12.2025, 31.12.25, 2025-12-31.</p>
+      </div>
+      <div class="field checkbox-field">
+        <label><input type="checkbox" id="dedupeLines"> Doppelte Zeilen pro PDF nur einmal zählen</label>
+      </div>
+    </div>
+  </details>
+
+  <!-- Fortschritt -->
+  <section id="progressSection" hidden>
+    <div class="progress-header">
+      <span id="progressLabel">Verarbeite …</span>
+      <span id="progressCount"></span>
+    </div>
+    <div class="progress-bar"><div id="progressFill"></div></div>
+  </section>
+
+  <!-- Ergebnis: Pivot Artikel × Monat -->
+  <section id="resultSection" hidden>
+    <div class="section-header">
+      <h2>Summen pro Artikel und Monat</h2>
+      <div class="actions">
+        <button class="btn" id="exportCsvBtn">CSV exportieren</button>
+        <button class="btn btn-danger" id="resetBtn">Alles zurücksetzen</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="pivotTable"></table>
+    </div>
+  </section>
+
+  <!-- Datei-Liste -->
+  <section id="filesSection" hidden>
+    <div class="section-header">
+      <h2>Verarbeitete Dateien</h2>
+      <span id="filesSummary" class="hint"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="filesTable">
+        <thead>
+          <tr><th>Datei</th><th>Datum</th><th>Monat</th><th>Positionen</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- Detail-Dialog pro Datei -->
+<dialog id="detailDialog">
+  <div class="dialog-header">
+    <h3 id="detailTitle"></h3>
+    <button class="btn" id="detailClose">Schließen</button>
+  </div>
+  <div class="dialog-body">
+    <h4>Erkannte Positionen</h4>
+    <table id="detailItems"><thead><tr><th>Artikel</th><th>Menge</th><th>Zeile</th></tr></thead><tbody></tbody></table>
+    <h4>Extrahierter Text <span class="hint">(zum Anpassen des Zeilen-Musters)</span></h4>
+    <pre id="detailText"></pre>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

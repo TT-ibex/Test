@@ -1,0 +1,534 @@
+/* PDF-Rechnungsauswertung: Artikelmengen pro Monat summieren.
+   Läuft komplett im Browser – keine Daten verlassen den Rechner. */
+"use strict";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+
+const MAX_FILES = 200;
+const CONCURRENCY = 4;
+
+/* ---------- Vorlagen für die Positionserkennung ---------- */
+
+const PRESETS = [
+  {
+    name: "Menge mit Einheit (z. B. „ART-123 … 5 Stk“)",
+    regex: "(?<artikel>[A-Za-z]{0,4}[-./]?\\d[\\w.\\-/]{2,})\\b.*?\\b(?<menge>\\d{1,6}(?:[.,]\\d{1,3})?)\\s*(?:Stk\\.?|Stück|Stck\\.?|St\\.?|Pcs\\.?|x)\\b",
+  },
+  {
+    name: "Artikelnummer am Zeilenanfang, Menge direkt danach",
+    regex: "^\\s*(?:\\d{1,4}\\s+)?(?<artikel>[A-Za-z]{0,4}[-./]?\\d[\\w.\\-/]{2,})\\s+(?<menge>\\d{1,6}(?:[.,]\\d{1,3})?)\\b",
+  },
+  {
+    name: "Menge am Zeilenanfang, Artikelnummer danach (z. B. „5 ART-123 …“)",
+    regex: "^\\s*(?<menge>\\d{1,6}(?:[.,]\\d{1,3})?)\\s+(?<artikel>[A-Za-z]{0,4}[-./]?\\d[\\w.\\-/]{2,})\\b",
+  },
+  {
+    name: "Nur Artikelnummer zählen (jeder Treffer = 1)",
+    regex: "\\b(?<artikel>[A-Za-z]{2,4}-\\d{3,})\\b",
+  },
+];
+
+/* ---------- Zustand ---------- */
+
+/** @type {Array<{name:string, status:string, message:string, date:Date|null, monthKey:string|null, lines:string[], items:Array<{artikel:string, menge:number, line:string}>}>} */
+let fileResults = [];
+let processing = false;
+
+/* ---------- DOM ---------- */
+
+const $ = (id) => document.getElementById(id);
+const dropzone = $("dropzone");
+const fileInput = $("fileInput");
+const presetSelect = $("presetSelect");
+const lineRegexInput = $("lineRegex");
+const regexError = $("regexError");
+const dateKeywordsInput = $("dateKeywords");
+const dedupeCheckbox = $("dedupeLines");
+
+/* ---------- Initialisierung ---------- */
+
+PRESETS.forEach((p, i) => {
+  const opt = document.createElement("option");
+  opt.value = String(i);
+  opt.textContent = p.name;
+  presetSelect.appendChild(opt);
+});
+const custom = document.createElement("option");
+custom.value = "custom";
+custom.textContent = "Eigenes Muster";
+presetSelect.appendChild(custom);
+lineRegexInput.value = PRESETS[0].regex;
+
+presetSelect.addEventListener("change", () => {
+  if (presetSelect.value !== "custom") {
+    lineRegexInput.value = PRESETS[Number(presetSelect.value)].regex;
+  }
+  reanalyzeAll();
+});
+lineRegexInput.addEventListener("input", debounce(() => {
+  presetSelect.value = "custom";
+  reanalyzeAll();
+}, 400));
+dateKeywordsInput.addEventListener("input", debounce(reanalyzeAll, 400));
+dedupeCheckbox.addEventListener("change", reanalyzeAll);
+
+$("exportCsvBtn").addEventListener("click", exportCsv);
+$("resetBtn").addEventListener("click", () => {
+  fileResults = [];
+  renderAll();
+});
+$("detailClose").addEventListener("click", () => $("detailDialog").close());
+
+fileInput.addEventListener("change", () => {
+  handleFiles(Array.from(fileInput.files));
+  fileInput.value = "";
+});
+
+["dragenter", "dragover"].forEach((ev) =>
+  dropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dropzone.classList.add("dragover");
+  })
+);
+["dragleave", "drop"].forEach((ev) =>
+  dropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+  })
+);
+dropzone.addEventListener("drop", (e) => {
+  handleFiles(Array.from(e.dataTransfer.files));
+});
+
+/* ---------- Datei-Verarbeitung ---------- */
+
+async function handleFiles(files) {
+  const pdfs = files.filter(
+    (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name)
+  );
+  if (!pdfs.length) {
+    alert("Keine PDF-Dateien gefunden.");
+    return;
+  }
+  if (pdfs.length > MAX_FILES) {
+    alert(`Bitte maximal ${MAX_FILES} PDFs auf einmal hochladen (ausgewählt: ${pdfs.length}). Es werden die ersten ${MAX_FILES} verarbeitet.`);
+    pdfs.length = MAX_FILES;
+  }
+  if (processing) {
+    alert("Es läuft bereits eine Verarbeitung. Bitte warten.");
+    return;
+  }
+
+  processing = true;
+  showProgress(0, pdfs.length);
+
+  let done = 0;
+  const queue = pdfs.slice();
+  const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+    while (queue.length) {
+      const file = queue.shift();
+      const result = await processFile(file);
+      fileResults.push(result);
+      done++;
+      showProgress(done, pdfs.length);
+    }
+  });
+  await Promise.all(workers);
+
+  processing = false;
+  $("progressSection").hidden = true;
+  renderAll();
+}
+
+async function processFile(file) {
+  const result = {
+    name: file.name,
+    status: "ok",
+    message: "",
+    date: null,
+    monthKey: null,
+    lines: [],
+    items: [],
+  };
+  try {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const lines = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      lines.push(...buildLines(content.items));
+      page.cleanup();
+    }
+    await doc.destroy();
+    result.lines = lines;
+    analyzeResult(result);
+  } catch (err) {
+    result.status = "err";
+    result.message = "PDF konnte nicht gelesen werden: " + (err && err.message ? err.message : err);
+  }
+  return result;
+}
+
+/** Textfragmente anhand der Y-Koordinate zu Zeilen zusammensetzen. */
+function buildLines(items) {
+  const rows = [];
+  const TOL = 2.5;
+  for (const item of items) {
+    if (!item.str || !item.str.trim()) continue;
+    const y = item.transform[5];
+    const x = item.transform[4];
+    let row = rows.find((r) => Math.abs(r.y - y) <= TOL);
+    if (!row) {
+      row = { y, parts: [] };
+      rows.push(row);
+    }
+    row.parts.push({ x, str: item.str });
+  }
+  rows.sort((a, b) => b.y - a.y);
+  return rows.map((r) =>
+    r.parts
+      .sort((a, b) => a.x - b.x)
+      .map((p) => p.str)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+/* ---------- Analyse (Datum + Positionen) ---------- */
+
+function compileLineRegex() {
+  regexError.hidden = true;
+  try {
+    const re = new RegExp(lineRegexInput.value, "i");
+    if (!lineRegexInput.value.includes("?<artikel>")) {
+      throw new Error("Die Gruppe (?<artikel>…) fehlt im Muster.");
+    }
+    return re;
+  } catch (err) {
+    regexError.textContent = "Ungültiges Muster: " + err.message;
+    regexError.hidden = false;
+    return null;
+  }
+}
+
+function analyzeResult(result) {
+  if (result.status === "err") return;
+
+  const found = findInvoiceDate(result.lines);
+  result.date = found;
+  result.monthKey = found
+    ? `${found.getFullYear()}-${String(found.getMonth() + 1).padStart(2, "0")}`
+    : null;
+
+  const re = compileLineRegex();
+  result.items = [];
+  if (re) {
+    const seen = new Set();
+    for (const line of result.lines) {
+      const m = re.exec(line);
+      if (!m || !m.groups || !m.groups.artikel) continue;
+      if (dedupeCheckbox.checked) {
+        if (seen.has(line)) continue;
+        seen.add(line);
+      }
+      const menge = m.groups.menge !== undefined ? parseGermanNumber(m.groups.menge) : 1;
+      if (!isFinite(menge) || menge <= 0) continue;
+      result.items.push({ artikel: m.groups.artikel, menge, line });
+    }
+  }
+
+  if (!result.monthKey && !result.items.length) {
+    result.status = "warn";
+    result.message = "Weder Datum noch Positionen erkannt.";
+  } else if (!result.monthKey) {
+    result.status = "warn";
+    result.message = "Kein Rechnungsdatum erkannt – Positionen werden unter „Ohne Datum“ geführt.";
+  } else if (!result.items.length) {
+    result.status = "warn";
+    result.message = "Keine Positionen erkannt – ggf. Zeilen-Muster anpassen (Details ansehen).";
+  } else {
+    result.status = "ok";
+    result.message = "";
+  }
+}
+
+const DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b|\b(\d{4})-(\d{2})-(\d{2})\b/g;
+
+function parseDateMatch(m) {
+  let day, month, year;
+  if (m[1] !== undefined) {
+    day = Number(m[1]); month = Number(m[2]); year = Number(m[3]);
+    if (year < 100) year += 2000;
+  } else {
+    year = Number(m[4]); month = Number(m[5]); day = Number(m[6]);
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (year < 1990 || year > 2100) return null;
+  return new Date(year, month - 1, day);
+}
+
+function findInvoiceDate(lines) {
+  const keywords = dateKeywordsInput.value
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  // 1. Datum in einer Zeile mit Schlüsselwort (in Reihenfolge der Schlüsselwörter)
+  for (const kw of keywords) {
+    for (const line of lines) {
+      if (!line.toLowerCase().includes(kw)) continue;
+      DATE_RE.lastIndex = 0;
+      let m;
+      while ((m = DATE_RE.exec(line))) {
+        const d = parseDateMatch(m);
+        if (d) return d;
+      }
+    }
+  }
+  // 2. Erstes gültiges Datum im Dokument
+  for (const line of lines) {
+    DATE_RE.lastIndex = 0;
+    let m;
+    while ((m = DATE_RE.exec(line))) {
+      const d = parseDateMatch(m);
+      if (d) return d;
+    }
+  }
+  return null;
+}
+
+function parseGermanNumber(s) {
+  s = String(s).trim();
+  if (s.includes(",") && s.includes(".")) s = s.replace(/\./g, "").replace(",", ".");
+  else s = s.replace(",", ".");
+  return parseFloat(s);
+}
+
+/** Bereits eingelesene PDFs mit den aktuellen Einstellungen neu auswerten (ohne erneutes Einlesen). */
+function reanalyzeAll() {
+  if (!fileResults.length) {
+    compileLineRegex();
+    return;
+  }
+  for (const r of fileResults) analyzeResult(r);
+  renderAll();
+}
+
+/* ---------- Aggregation & Darstellung ---------- */
+
+const NO_DATE = "Ohne Datum";
+
+function aggregate() {
+  const months = new Set();
+  const perArticle = new Map(); // artikel -> Map(monthKey -> summe)
+  for (const r of fileResults) {
+    if (r.status === "err") continue;
+    const key = r.monthKey || NO_DATE;
+    for (const item of r.items) {
+      months.add(key);
+      let row = perArticle.get(item.artikel);
+      if (!row) {
+        row = new Map();
+        perArticle.set(item.artikel, row);
+      }
+      row.set(key, (row.get(key) || 0) + item.menge);
+    }
+  }
+  const monthKeys = Array.from(months).sort((a, b) => {
+    if (a === NO_DATE) return 1;
+    if (b === NO_DATE) return -1;
+    return a.localeCompare(b);
+  });
+  const articles = Array.from(perArticle.keys()).sort((a, b) =>
+    a.localeCompare(b, "de", { numeric: true })
+  );
+  return { monthKeys, articles, perArticle };
+}
+
+const numFmt = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 3 });
+
+function monthLabel(key) {
+  if (key === NO_DATE) return key;
+  const [y, m] = key.split("-");
+  return `${m}/${y}`;
+}
+
+function renderAll() {
+  renderPivot();
+  renderFiles();
+}
+
+function renderPivot() {
+  const { monthKeys, articles, perArticle } = aggregate();
+  const section = $("resultSection");
+  section.hidden = articles.length === 0;
+  if (!articles.length) return;
+
+  const table = $("pivotTable");
+  table.innerHTML = "";
+
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  hr.appendChild(th("Artikelnummer"));
+  for (const mk of monthKeys) hr.appendChild(th(monthLabel(mk), "num"));
+  hr.appendChild(th("Gesamt", "num total-col"));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  const colTotals = new Map();
+  let grandTotal = 0;
+
+  for (const art of articles) {
+    const row = perArticle.get(art);
+    const tr = document.createElement("tr");
+    tr.appendChild(td(art));
+    let rowTotal = 0;
+    for (const mk of monthKeys) {
+      const v = row.get(mk) || 0;
+      rowTotal += v;
+      colTotals.set(mk, (colTotals.get(mk) || 0) + v);
+      tr.appendChild(td(v ? numFmt.format(v) : "–", "num"));
+    }
+    grandTotal += rowTotal;
+    tr.appendChild(td(numFmt.format(rowTotal), "num total-col"));
+    tbody.appendChild(tr);
+  }
+
+  const totalTr = document.createElement("tr");
+  totalTr.className = "total-row";
+  totalTr.appendChild(td("Gesamt"));
+  for (const mk of monthKeys) totalTr.appendChild(td(numFmt.format(colTotals.get(mk) || 0), "num"));
+  totalTr.appendChild(td(numFmt.format(grandTotal), "num total-col"));
+  tbody.appendChild(totalTr);
+
+  table.appendChild(tbody);
+}
+
+function renderFiles() {
+  const section = $("filesSection");
+  section.hidden = fileResults.length === 0;
+  if (!fileResults.length) return;
+
+  const ok = fileResults.filter((r) => r.status === "ok").length;
+  const warn = fileResults.filter((r) => r.status === "warn").length;
+  const err = fileResults.filter((r) => r.status === "err").length;
+  $("filesSummary").textContent =
+    `${fileResults.length} Dateien – ${ok} ok, ${warn} mit Hinweis, ${err} fehlerhaft`;
+
+  const tbody = $("filesTable").querySelector("tbody");
+  tbody.innerHTML = "";
+  fileResults.forEach((r, idx) => {
+    const tr = document.createElement("tr");
+    tr.appendChild(td(r.name));
+    tr.appendChild(td(r.date ? r.date.toLocaleDateString("de-DE") : "–"));
+    tr.appendChild(td(r.monthKey ? monthLabel(r.monthKey) : "–"));
+    tr.appendChild(td(String(r.items.length), "num"));
+    const statusTd = td(
+      r.status === "ok" ? "✓ OK" : r.status === "warn" ? "⚠ " + r.message : "✗ " + r.message
+    );
+    statusTd.className = r.status === "ok" ? "status-ok" : r.status === "warn" ? "status-warn" : "status-err";
+    statusTd.style.whiteSpace = "normal";
+    tr.appendChild(statusTd);
+
+    const detailTd = document.createElement("td");
+    if (r.status !== "err") {
+      const btn = document.createElement("button");
+      btn.className = "link-btn";
+      btn.textContent = "Details";
+      btn.addEventListener("click", () => showDetail(idx));
+      detailTd.appendChild(btn);
+    }
+    tr.appendChild(detailTd);
+    tbody.appendChild(tr);
+  });
+}
+
+function showDetail(idx) {
+  const r = fileResults[idx];
+  $("detailTitle").textContent = r.name;
+  const tbody = $("detailItems").querySelector("tbody");
+  tbody.innerHTML = "";
+  if (r.items.length) {
+    for (const item of r.items) {
+      const tr = document.createElement("tr");
+      tr.appendChild(td(item.artikel));
+      tr.appendChild(td(numFmt.format(item.menge), "num"));
+      tr.appendChild(td(item.line));
+      tbody.appendChild(tr);
+    }
+  } else {
+    const tr = document.createElement("tr");
+    const cell = td("Keine Positionen erkannt.");
+    cell.colSpan = 3;
+    tr.appendChild(cell);
+    tbody.appendChild(tr);
+  }
+  $("detailText").textContent = r.lines.join("\n") || "(kein Text extrahierbar – evtl. gescanntes PDF ohne Textebene)";
+  $("detailDialog").showModal();
+}
+
+/* ---------- CSV-Export ---------- */
+
+function exportCsv() {
+  const { monthKeys, articles, perArticle } = aggregate();
+  if (!articles.length) return;
+
+  const sep = ";";
+  const rows = [];
+  rows.push(["Artikelnummer", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
+  for (const art of articles) {
+    const row = perArticle.get(art);
+    let total = 0;
+    const cells = monthKeys.map((mk) => {
+      const v = row.get(mk) || 0;
+      total += v;
+      return csvNum(v);
+    });
+    rows.push([csvCell(art), ...cells, csvNum(total)].join(sep));
+  }
+
+  const blob = new Blob(["﻿" + rows.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "artikel-pro-monat.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function csvNum(v) {
+  return String(v).replace(".", ",");
+}
+function csvCell(s) {
+  return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/* ---------- Helfer ---------- */
+
+function th(text, cls) {
+  const el = document.createElement("th");
+  el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+function td(text, cls) {
+  const el = document.createElement("td");
+  el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+function showProgress(done, total) {
+  $("progressSection").hidden = false;
+  $("progressLabel").textContent = "Verarbeite PDFs …";
+  $("progressCount").textContent = `${done} / ${total}`;
+  $("progressFill").style.width = total ? (done / total) * 100 + "%" : "0";
+}
+function debounce(fn, ms) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
