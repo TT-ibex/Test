@@ -123,6 +123,7 @@ thead th {
   cursor: default;
 }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.desc { white-space: normal; min-width: 220px; max-width: 380px; }
 tr.total-row td { font-weight: 700; background: #f7f9fb; }
 td.total-col, th.total-col { font-weight: 700; background: #fbfcfd; }
 
@@ -335,7 +336,7 @@ dialog::backdrop { background: rgba(20, 30, 40, .5); }
   </div>
   <div class="dialog-body">
     <h4>Erkannte Positionen</h4>
-    <table id="detailItems"><thead><tr><th>Artikel</th><th>Menge</th><th>Zeile</th></tr></thead><tbody></tbody></table>
+    <table id="detailItems"><thead><tr><th>Artikel</th><th>Bezeichnung</th><th>Menge</th><th>Zeile</th></tr></thead><tbody></tbody></table>
     <h4>Extrahierter Text <span class="hint">(zum Anpassen des Zeilen-Musters)</span></h4>
     <pre id="detailText"></pre>
   </div>
@@ -621,7 +622,8 @@ function analyzeResult(result) {
         }
         const menge = m.groups.menge !== undefined ? parseGermanNumber(m.groups.menge) : 1;
         if (!isFinite(menge) || menge <= 0) continue;
-        result.items.push({ artikel: m.groups.artikel, menge, line });
+        const bezeichnung = m.groups.bezeichnung ? cleanDescription(m.groups.bezeichnung) : "";
+        result.items.push({ artikel: m.groups.artikel, bezeichnung, menge, line });
       }
     }
   }
@@ -649,8 +651,10 @@ function parseMultilineItems(lines, posRe, artRe) {
   let pending = null;
   const flush = () => {
     if (!pending) return;
+    const desc = cleanDescription(pending.text);
     items.push({
-      artikel: "(ohne Art.-Nr.) " + cleanDescription(pending.text),
+      artikel: "(ohne Art.-Nr.) " + desc,
+      bezeichnung: desc,
       menge: pending.menge,
       line: pending.line,
     });
@@ -670,6 +674,7 @@ function parseMultilineItems(lines, posRe, artRe) {
     if (am && am.groups && am.groups.artikel && pending) {
       items.push({
         artikel: am.groups.artikel.trim(),
+        bezeichnung: cleanDescription(pending.text),
         menge: pending.menge,
         line: pending.line + "  →  " + line,
       });
@@ -686,8 +691,10 @@ function cleanDescription(s) {
       .replace(/Zusatzrabatt.*$/i, "")
       .replace(/[\d.,]+\s*€.*$/, "")
       .replace(/\s+/g, " ")
+      .replace(/^[\s.:\-–]+/, "")
+      .replace(/[\s\-–]+$/, "")
       .trim()
-      .slice(0, 60) || "(ohne Bezeichnung)"
+      .slice(0, 80) || "(ohne Bezeichnung)"
   );
 }
 
@@ -765,6 +772,7 @@ const NO_DATE = "Ohne Datum";
 function aggregate() {
   const months = new Set();
   const perArticle = new Map(); // artikel -> Map(monthKey -> summe)
+  const descByArticle = new Map(); // artikel -> erste nicht-leere Bezeichnung
   for (const r of fileResults) {
     if (r.status === "err") continue;
     const key = r.monthKey || NO_DATE;
@@ -776,6 +784,9 @@ function aggregate() {
         perArticle.set(item.artikel, row);
       }
       row.set(key, (row.get(key) || 0) + item.menge);
+      if (item.bezeichnung && !descByArticle.get(item.artikel)) {
+        descByArticle.set(item.artikel, item.bezeichnung);
+      }
     }
   }
   const monthKeys = Array.from(months).sort((a, b) => {
@@ -786,7 +797,7 @@ function aggregate() {
   const articles = Array.from(perArticle.keys()).sort((a, b) =>
     a.localeCompare(b, "de", { numeric: true })
   );
-  return { monthKeys, articles, perArticle };
+  return { monthKeys, articles, perArticle, descByArticle };
 }
 
 const numFmt = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 3 });
@@ -803,7 +814,7 @@ function renderAll() {
 }
 
 function renderPivot() {
-  const { monthKeys, articles, perArticle } = aggregate();
+  const { monthKeys, articles, perArticle, descByArticle } = aggregate();
   const section = $("resultSection");
   section.hidden = articles.length === 0;
   if (!articles.length) return;
@@ -814,6 +825,7 @@ function renderPivot() {
   const thead = document.createElement("thead");
   const hr = document.createElement("tr");
   hr.appendChild(th("Artikelnummer"));
+  hr.appendChild(th("Bezeichnung"));
   for (const mk of monthKeys) hr.appendChild(th(monthLabel(mk), "num"));
   hr.appendChild(th("Gesamt", "num total-col"));
   thead.appendChild(hr);
@@ -827,6 +839,7 @@ function renderPivot() {
     const row = perArticle.get(art);
     const tr = document.createElement("tr");
     tr.appendChild(td(art));
+    tr.appendChild(td(descByArticle.get(art) || "", "desc"));
     let rowTotal = 0;
     for (const mk of monthKeys) {
       const v = row.get(mk) || 0;
@@ -842,6 +855,7 @@ function renderPivot() {
   const totalTr = document.createElement("tr");
   totalTr.className = "total-row";
   totalTr.appendChild(td("Gesamt"));
+  totalTr.appendChild(td(""));
   for (const mk of monthKeys) totalTr.appendChild(td(numFmt.format(colTotals.get(mk) || 0), "num"));
   totalTr.appendChild(td(numFmt.format(grandTotal), "num total-col"));
   tbody.appendChild(totalTr);
@@ -897,6 +911,7 @@ function showDetail(idx) {
     for (const item of r.items) {
       const tr = document.createElement("tr");
       tr.appendChild(td(item.artikel));
+      tr.appendChild(td(item.bezeichnung || "", "desc"));
       tr.appendChild(td(numFmt.format(item.menge), "num"));
       tr.appendChild(td(item.line));
       tbody.appendChild(tr);
@@ -904,7 +919,7 @@ function showDetail(idx) {
   } else {
     const tr = document.createElement("tr");
     const cell = td("Keine Positionen erkannt.");
-    cell.colSpan = 3;
+    cell.colSpan = 4;
     tr.appendChild(cell);
     tbody.appendChild(tr);
   }
@@ -915,12 +930,12 @@ function showDetail(idx) {
 /* ---------- CSV-Export ---------- */
 
 function exportCsv() {
-  const { monthKeys, articles, perArticle } = aggregate();
+  const { monthKeys, articles, perArticle, descByArticle } = aggregate();
   if (!articles.length) return;
 
   const sep = ";";
   const rows = [];
-  rows.push(["Artikelnummer", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
+  rows.push(["Artikelnummer", "Bezeichnung", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
   for (const art of articles) {
     const row = perArticle.get(art);
     let total = 0;
@@ -929,7 +944,7 @@ function exportCsv() {
       total += v;
       return csvNum(v);
     });
-    rows.push([csvCell(art), ...cells, csvNum(total)].join(sep));
+    rows.push([csvCell(art), csvCell(descByArticle.get(art) || ""), ...cells, csvNum(total)].join(sep));
   }
 
   const blob = new Blob(["﻿" + rows.join("\r\n")], { type: "text/csv;charset=utf-8" });

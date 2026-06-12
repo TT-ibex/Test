@@ -116,6 +116,7 @@ thead th {
   cursor: default;
 }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.desc { white-space: normal; min-width: 220px; max-width: 380px; }
 tr.total-row td { font-weight: 700; background: #f7f9fb; }
 td.total-col, th.total-col { font-weight: 700; background: #fbfcfd; }
 
