@@ -24,7 +24,9 @@ Da Rechnungslayouts unterschiedlich sind, ist die Positionserkennung konfigurier
 
 ## Starten
 
-Am einfachsten direkt `index.html` doppelklicken – die Seite funktioniert auch ohne Webserver.
+**Am einfachsten:** Die Datei `PDF-Auswertung.html` herunterladen und doppelklicken. Sie enthält alles in einer einzigen Datei (Logik und pdf.js eingebettet) und funktioniert ohne weitere Dateien, ohne Installation und ohne Webserver. (Nach Änderungen an `app.js`/`styles.css`/`index.html` mit `node tools/build-standalone.mjs` neu erzeugen.)
+
+Alternativ das ganze Repository herunterladen und `index.html` doppelklicken – auch das funktioniert ohne Webserver, benötigt aber die Ordnerstruktur (`vendor/` usw.).
 
 Alternativ mit lokalem Webserver (schneller bei vielen PDFs, da pdf.js dann in einem Hintergrund-Thread arbeitet):
 
