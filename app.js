@@ -28,6 +28,14 @@ const PRESETS = [
   },
 ];
 
+/* Standard-Muster für den mehrzeiligen Modus:
+   Positionszeile wie „01 1 Stk. Grundgerät …“ oder „03 1 SET Option …“,
+   Artikelnummer in eigener Zeile wie „Art. Nr.: 0430 0043“ (Rev.-Zusatz wird abgeschnitten). */
+const DEFAULT_POS_REGEX =
+  "^\\s*\\d{1,3}\\s+(?<menge>\\d{1,6}(?:[.,]\\d{1,3})?)\\s*(?:Stk\\.?|Stück|SET|Set|Paar|Pcs\\.?|kg|m|Std\\.?|h)\\b\\s*(?<text>.*)$";
+const DEFAULT_ART_REGEX =
+  "^\\s*Art\\.?\\s*-?\\s*Nr\\.?\\s*:?\\s*(?<artikel>.+?)(?:\\s+Rev\\b.*)?$";
+
 /* ---------- Zustand ---------- */
 
 /** @type {Array<{name:string, status:string, message:string, date:Date|null, monthKey:string|null, lines:string[], items:Array<{artikel:string, menge:number, line:string}>}>} */
@@ -44,6 +52,11 @@ const lineRegexInput = $("lineRegex");
 const regexError = $("regexError");
 const dateKeywordsInput = $("dateKeywords");
 const dedupeCheckbox = $("dedupeLines");
+const modeSelect = $("modeSelect");
+const posLineRegexInput = $("posLineRegex");
+const artLineRegexInput = $("artLineRegex");
+const posRegexError = $("posRegexError");
+const artRegexError = $("artRegexError");
 
 /* ---------- Initialisierung ---------- */
 
@@ -58,6 +71,22 @@ custom.value = "custom";
 custom.textContent = "Eigenes Muster";
 presetSelect.appendChild(custom);
 lineRegexInput.value = PRESETS[0].regex;
+posLineRegexInput.value = DEFAULT_POS_REGEX;
+artLineRegexInput.value = DEFAULT_ART_REGEX;
+
+function currentMode() {
+  return modeSelect.value === "singleline" ? "singleline" : "multiline";
+}
+function updateModeVisibility() {
+  $("multilineFields").hidden = currentMode() !== "multiline";
+  $("singlelineFields").hidden = currentMode() !== "singleline";
+}
+modeSelect.addEventListener("change", () => {
+  updateModeVisibility();
+  reanalyzeAll();
+});
+posLineRegexInput.addEventListener("input", debounce(reanalyzeAll, 400));
+artLineRegexInput.addEventListener("input", debounce(reanalyzeAll, 400));
 
 presetSelect.addEventListener("change", () => {
   if (presetSelect.value !== "custom") {
@@ -71,6 +100,8 @@ lineRegexInput.addEventListener("input", debounce(() => {
 }, 400));
 dateKeywordsInput.addEventListener("input", debounce(reanalyzeAll, 400));
 dedupeCheckbox.addEventListener("change", reanalyzeAll);
+
+updateModeVisibility();
 
 $("exportCsvBtn").addEventListener("click", exportCsv);
 $("resetBtn").addEventListener("click", () => {
@@ -198,19 +229,23 @@ function buildLines(items) {
 
 /* ---------- Analyse (Datum + Positionen) ---------- */
 
-function compileLineRegex() {
-  regexError.hidden = true;
+function compileRegex(input, errorEl, requiredGroup) {
+  errorEl.hidden = true;
   try {
-    const re = new RegExp(lineRegexInput.value, "i");
-    if (!lineRegexInput.value.includes("?<artikel>")) {
-      throw new Error("Die Gruppe (?<artikel>…) fehlt im Muster.");
+    const re = new RegExp(input.value, "i");
+    if (!input.value.includes(`?<${requiredGroup}>`)) {
+      throw new Error(`Die Gruppe (?<${requiredGroup}>…) fehlt im Muster.`);
     }
     return re;
   } catch (err) {
-    regexError.textContent = "Ungültiges Muster: " + err.message;
-    regexError.hidden = false;
+    errorEl.textContent = "Ungültiges Muster: " + err.message;
+    errorEl.hidden = false;
     return null;
   }
+}
+
+function compileLineRegex() {
+  return compileRegex(lineRegexInput, regexError, "artikel");
 }
 
 function analyzeResult(result) {
@@ -222,20 +257,28 @@ function analyzeResult(result) {
     ? `${found.getFullYear()}-${String(found.getMonth() + 1).padStart(2, "0")}`
     : null;
 
-  const re = compileLineRegex();
   result.items = [];
-  if (re) {
-    const seen = new Set();
-    for (const line of result.lines) {
-      const m = re.exec(line);
-      if (!m || !m.groups || !m.groups.artikel) continue;
-      if (dedupeCheckbox.checked) {
-        if (seen.has(line)) continue;
-        seen.add(line);
+  if (currentMode() === "multiline") {
+    const posRe = compileRegex(posLineRegexInput, posRegexError, "menge");
+    const artRe = compileRegex(artLineRegexInput, artRegexError, "artikel");
+    if (posRe && artRe) {
+      result.items = parseMultilineItems(result.lines, posRe, artRe);
+    }
+  } else {
+    const re = compileLineRegex();
+    if (re) {
+      const seen = new Set();
+      for (const line of result.lines) {
+        const m = re.exec(line);
+        if (!m || !m.groups || !m.groups.artikel) continue;
+        if (dedupeCheckbox.checked) {
+          if (seen.has(line)) continue;
+          seen.add(line);
+        }
+        const menge = m.groups.menge !== undefined ? parseGermanNumber(m.groups.menge) : 1;
+        if (!isFinite(menge) || menge <= 0) continue;
+        result.items.push({ artikel: m.groups.artikel, menge, line });
       }
-      const menge = m.groups.menge !== undefined ? parseGermanNumber(m.groups.menge) : 1;
-      if (!isFinite(menge) || menge <= 0) continue;
-      result.items.push({ artikel: m.groups.artikel, menge, line });
     }
   }
 
@@ -252,6 +295,56 @@ function analyzeResult(result) {
     result.status = "ok";
     result.message = "";
   }
+}
+
+/* Mehrzeiliger Modus: Menge aus der Positionszeile merken und mit der
+   nächsten „Art. Nr.:“-Zeile verknüpfen. Positionen ohne Artikelnummer
+   werden unter ihrer Bezeichnung gezählt. */
+function parseMultilineItems(lines, posRe, artRe) {
+  const items = [];
+  let pending = null;
+  const flush = () => {
+    if (!pending) return;
+    items.push({
+      artikel: "(ohne Art.-Nr.) " + cleanDescription(pending.text),
+      menge: pending.menge,
+      line: pending.line,
+    });
+    pending = null;
+  };
+  for (const line of lines) {
+    const pm = posRe.exec(line);
+    if (pm && pm.groups && pm.groups.menge !== undefined) {
+      flush();
+      const menge = parseGermanNumber(pm.groups.menge);
+      if (isFinite(menge) && menge > 0) {
+        pending = { menge, text: pm.groups.text || "", line };
+      }
+      continue;
+    }
+    const am = artRe.exec(line);
+    if (am && am.groups && am.groups.artikel && pending) {
+      items.push({
+        artikel: am.groups.artikel.trim(),
+        menge: pending.menge,
+        line: pending.line + "  →  " + line,
+      });
+      pending = null;
+    }
+  }
+  flush();
+  return items;
+}
+
+function cleanDescription(s) {
+  return (
+    String(s)
+      .replace(/Zusatzrabatt.*$/i, "")
+      .replace(/[\d.,]+\s*€.*$/, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 60) || "(ohne Bezeichnung)"
+  );
 }
 
 const DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b|\b(\d{4})-(\d{2})-(\d{2})\b/g;
@@ -309,7 +402,12 @@ function parseGermanNumber(s) {
 /** Bereits eingelesene PDFs mit den aktuellen Einstellungen neu auswerten (ohne erneutes Einlesen). */
 function reanalyzeAll() {
   if (!fileResults.length) {
-    compileLineRegex();
+    if (currentMode() === "multiline") {
+      compileRegex(posLineRegexInput, posRegexError, "menge");
+      compileRegex(artLineRegexInput, artRegexError, "artikel");
+    } else {
+      compileLineRegex();
+    }
     return;
   }
   for (const r of fileResults) analyzeResult(r);

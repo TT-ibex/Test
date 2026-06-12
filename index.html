@@ -33,22 +33,44 @@
     <summary>Erkennungs-Einstellungen</summary>
     <div class="settings-body">
       <div class="field">
-        <label for="presetSelect">Vorlage für Positionserkennung</label>
-        <select id="presetSelect"></select>
+        <label for="modeSelect">Erkennungsmodus</label>
+        <select id="modeSelect">
+          <option value="multiline">Positionszeile + „Art. Nr.:“-Zeile (Standard)</option>
+          <option value="singleline">Einzeilige Positionen (eigenes Muster)</option>
+        </select>
+        <p class="hint">Standard passt auf Rechnungen, bei denen die Menge in der Positionszeile steht (z.&nbsp;B. „01 1 Stk. Grundgerät …“) und die Artikelnummer in einer eigenen Zeile darunter („Art. Nr.: 0430 0043“).</p>
       </div>
-      <div class="field">
-        <label for="lineRegex">Zeilen-Muster (regulärer Ausdruck mit Gruppen <code>artikel</code> und <code>menge</code>)</label>
-        <input type="text" id="lineRegex" spellcheck="false">
-        <p class="hint">Wird auf jede Textzeile der PDFs angewendet. Die Gruppe <code>(?&lt;artikel&gt;…)</code> liefert die Artikelnummer, <code>(?&lt;menge&gt;…)</code> die Menge. Fehlt die Mengen-Gruppe, zählt jeder Treffer als 1.</p>
-        <p class="hint error" id="regexError" hidden></p>
+      <div id="multilineFields">
+        <div class="field">
+          <label for="posLineRegex">Muster Positionszeile (Gruppe <code>menge</code>)</label>
+          <input type="text" id="posLineRegex" spellcheck="false">
+          <p class="hint error" id="posRegexError" hidden></p>
+        </div>
+        <div class="field">
+          <label for="artLineRegex">Muster Artikelnummern-Zeile (Gruppe <code>artikel</code>)</label>
+          <input type="text" id="artLineRegex" spellcheck="false">
+          <p class="hint error" id="artRegexError" hidden></p>
+        </div>
+      </div>
+      <div id="singlelineFields" hidden>
+        <div class="field">
+          <label for="presetSelect">Vorlage für Positionserkennung</label>
+          <select id="presetSelect"></select>
+        </div>
+        <div class="field">
+          <label for="lineRegex">Zeilen-Muster (regulärer Ausdruck mit Gruppen <code>artikel</code> und <code>menge</code>)</label>
+          <input type="text" id="lineRegex" spellcheck="false">
+          <p class="hint">Wird auf jede Textzeile der PDFs angewendet. Die Gruppe <code>(?&lt;artikel&gt;…)</code> liefert die Artikelnummer, <code>(?&lt;menge&gt;…)</code> die Menge. Fehlt die Mengen-Gruppe, zählt jeder Treffer als 1.</p>
+          <p class="hint error" id="regexError" hidden></p>
+        </div>
+        <div class="field checkbox-field">
+          <label><input type="checkbox" id="dedupeLines"> Doppelte Zeilen pro PDF nur einmal zählen</label>
+        </div>
       </div>
       <div class="field">
         <label for="dateKeywords">Datums-Schlüsselwörter (Priorität bei der Monatszuordnung)</label>
         <input type="text" id="dateKeywords" value="Rechnungsdatum, Belegdatum, Leistungsdatum, Rechnung vom, Datum">
         <p class="hint">Es wird zuerst nach einem Datum neben diesen Begriffen gesucht; sonst gilt das erste gefundene Datum im Dokument. Unterstützte Formate: 31.12.2025, 31.12.25, 2025-12-31.</p>
-      </div>
-      <div class="field checkbox-field">
-        <label><input type="checkbox" id="dedupeLines"> Doppelte Zeilen pro PDF nur einmal zählen</label>
       </div>
     </div>
   </details>

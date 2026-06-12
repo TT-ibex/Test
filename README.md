@@ -13,9 +13,10 @@ Eine Webseite, mit der bis zu **200 PDF-Rechnungen auf einmal** hochgeladen und 
 
 ## Erkennung anpassen
 
-Da Rechnungslayouts unterschiedlich sind, ist die Positionserkennung konfigurierbar:
+Da Rechnungslayouts unterschiedlich sind, gibt es zwei Erkennungsmodi:
 
-- **Vorlage / Zeilen-Muster:** Ein regulärer Ausdruck, der auf jede Textzeile angewendet wird. Die benannte Gruppe `(?<artikel>…)` liefert die Artikelnummer, `(?<menge>…)` die Menge. Fehlt die Mengen-Gruppe, zählt jeder Treffer als 1. Es stehen mehrere Vorlagen zur Auswahl (Menge mit Einheit „Stk", Artikelnummer am Zeilenanfang usw.).
+- **Positionszeile + „Art. Nr.:"-Zeile (Standard):** Für Rechnungen, bei denen die Menge in der Positionszeile steht (z. B. „01 1 Stk. Grundgerät …") und die Artikelnummer in einer eigenen Zeile darunter („Art. Nr.: 0430 0043"). Beide Muster sind anpassbar; ein „Rev.:"-Zusatz hinter der Artikelnummer wird automatisch abgeschnitten. Positionen ohne „Art. Nr."-Zeile werden unter ihrer Bezeichnung gezählt.
+- **Einzeilige Positionen:** Ein regulärer Ausdruck, der auf jede Textzeile angewendet wird. Die benannte Gruppe `(?<artikel>…)` liefert die Artikelnummer, `(?<menge>…)` die Menge. Fehlt die Mengen-Gruppe, zählt jeder Treffer als 1. Es stehen mehrere Vorlagen zur Auswahl (Menge mit Einheit „Stk", Artikelnummer am Zeilenanfang usw.).
 - **Datums-Schlüsselwörter:** Für die Monatszuordnung wird zuerst nach einem Datum in einer Zeile mit diesen Begriffen gesucht (z. B. „Rechnungsdatum"), sonst gilt das erste Datum im Dokument. Unterstützte Formate: `31.12.2025`, `31.12.25`, `2025-12-31`.
 
 **Tipp zum Einstellen:** Erst ein paar PDFs hochladen, dann in der Dateiliste auf „Details" klicken – dort sieht man den extrahierten Text der Rechnung und kann das Muster passend anpassen. Änderungen am Muster werden **sofort auf alle bereits eingelesenen PDFs angewendet**, ohne dass man sie erneut hochladen muss.
