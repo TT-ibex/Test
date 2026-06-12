@@ -1,0 +1,12 @@
+{
+  "port": 3000,
+  "bestellEmpfaenger": "fanshop@terratec.cc",
+  "smtp": {
+    "host": "smtp.example.com",
+    "port": 587,
+    "secure": false,
+    "user": "versand@terratec.cc",
+    "pass": "GEHEIM",
+    "from": "Mitarbeiter-Shop <versand@terratec.cc>"
+  }
+}

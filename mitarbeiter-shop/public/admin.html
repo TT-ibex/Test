@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verwaltung – TerraTec Mitarbeiter-Shop</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Mitarbeiter-Shop – Verwaltung</h1>
+    <a href="index.html"><button class="sekundaer klein" type="button">Zum Shop</button></a>
+    <button id="logoutBtn" class="sekundaer klein" type="button">Abmelden</button>
+  </header>
+
+  <main>
+    <div id="meldung" class="meldung"></div>
+
+    <div class="tabs">
+      <button data-tab="bestellungen" class="aktiv" type="button">Bestellungen</button>
+      <button data-tab="mitarbeiter" type="button">Mitarbeiter &amp; Guthaben</button>
+      <button data-tab="artikel" type="button">Artikel</button>
+    </div>
+
+    <!-- Bestellungen -->
+    <section id="tab-bestellungen" class="card">
+      <h2>Alle Bestellungen</h2>
+      <p><a href="/api/admin/orders.csv"><button class="sekundaer klein" type="button">CSV exportieren</button></a></p>
+      <div id="bestellListe"></div>
+    </section>
+
+    <!-- Mitarbeiter -->
+    <section id="tab-mitarbeiter" class="card versteckt">
+      <h2>Mitarbeiter &amp; Guthaben</h2>
+      <div class="formzeile">
+        <div><label for="jgJahr">Jahr</label><input id="jgJahr" type="number" style="width:6em"></div>
+        <button id="jahresgutschriftBtn" type="button">Jahresguthaben gutschreiben</button>
+        <span class="muted">Schreibt jedem aktiven Mitarbeiter sein individuelles Jahresguthaben gut (pro Jahr nur einmal möglich).</span>
+      </div>
+      <hr>
+      <h2>Neuen Mitarbeiter anlegen</h2>
+      <form id="neuerMitarbeiterForm" class="formzeile">
+        <div><label for="nmName">Name</label><input id="nmName" required></div>
+        <div><label for="nmEmail">E-Mail</label><input id="nmEmail" type="email" required></div>
+        <div><label for="nmJahresguthaben">Jahresguthaben (€)</label><input id="nmJahresguthaben" type="number" min="0" step="0.01" value="0"></div>
+        <button type="submit">Anlegen</button>
+      </form>
+      <p class="muted">Beim Anlegen (und bei „Passwort zurücksetzen") wird ein Startpasswort erzeugt und einmalig angezeigt – bitte dem Mitarbeiter mitteilen.</p>
+      <div id="mitarbeiterListe"></div>
+    </section>
+
+    <!-- Artikel -->
+    <section id="tab-artikel" class="card versteckt">
+      <h2>Neuen Artikel anlegen</h2>
+      <form id="neuerArtikelForm">
+        <div class="formzeile">
+          <div><label for="naName">Name</label><input id="naName" required></div>
+          <div><label for="naPreis">Preis (€)</label><input id="naPreis" type="number" min="0" step="0.01" required></div>
+          <div><label for="naGroessen">Größen (mit Komma, optional)</label><input id="naGroessen" placeholder="S, M, L, XL"></div>
+        </div>
+        <div class="formzeile">
+          <div style="flex:1"><label for="naBeschreibung">Beschreibung</label><input id="naBeschreibung" style="width:100%"></div>
+          <div style="flex:1"><label for="naBild">Bild-URL (optional)</label><input id="naBild" style="width:100%"></div>
+          <button type="submit">Anlegen</button>
+        </div>
+      </form>
+      <hr>
+      <h2>Alle Artikel</h2>
+      <div id="artikelListe"></div>
+    </section>
+  </main>
+
+  <!-- Guthaben anpassen -->
+  <dialog id="guthabenDialog">
+    <h2>Guthaben anpassen: <span id="gdName"></span></h2>
+    <form id="guthabenForm" method="dialog">
+      <div class="formzeile">
+        <div><label for="gdBetrag">Betrag in € (negativ = abziehen)</label><input id="gdBetrag" type="number" step="0.01" required></div>
+      </div>
+      <div class="formzeile">
+        <div style="flex:1"><label for="gdNote">Anmerkung</label><input id="gdNote" style="width:100%" placeholder="z. B. Korrektur, Prämie"></div>
+      </div>
+      <button type="submit">Buchen</button>
+      <button type="button" class="sekundaer" id="gdAbbrechen">Abbrechen</button>
+    </form>
+  </dialog>
+
+  <!-- Mitarbeiter bearbeiten -->
+  <dialog id="mitarbeiterDialog">
+    <h2>Mitarbeiter bearbeiten</h2>
+    <form id="mitarbeiterForm" method="dialog">
+      <div class="formzeile"><div><label for="mdName">Name</label><input id="mdName" required></div></div>
+      <div class="formzeile"><div><label for="mdEmail">E-Mail</label><input id="mdEmail" type="email" required></div></div>
+      <div class="formzeile"><div><label for="mdJahresguthaben">Jahresguthaben (€)</label><input id="mdJahresguthaben" type="number" min="0" step="0.01"></div></div>
+      <button type="submit">Speichern</button>
+      <button type="button" class="sekundaer" id="mdAbbrechen">Abbrechen</button>
+    </form>
+  </dialog>
+
+  <!-- Artikel bearbeiten -->
+  <dialog id="artikelDialog">
+    <h2>Artikel bearbeiten</h2>
+    <form id="artikelForm" method="dialog">
+      <div class="formzeile">
+        <div><label for="adName">Name</label><input id="adName" required></div>
+        <div><label for="adPreis">Preis (€)</label><input id="adPreis" type="number" min="0" step="0.01" required></div>
+      </div>
+      <div class="formzeile"><div style="flex:1"><label for="adGroessen">Größen (mit Komma)</label><input id="adGroessen" style="width:100%"></div></div>
+      <div class="formzeile"><div style="flex:1"><label for="adBeschreibung">Beschreibung</label><input id="adBeschreibung" style="width:100%"></div></div>
+      <div class="formzeile"><div style="flex:1"><label for="adBild">Bild-URL</label><input id="adBild" style="width:100%"></div></div>
+      <button type="submit">Speichern</button>
+      <button type="button" class="sekundaer" id="adAbbrechen">Abbrechen</button>
+    </form>
+  </dialog>
+
+  <script src="admin.js"></script>
+</body>
+</html>
