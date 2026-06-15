@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TerraTec Mitarbeiter-Shop</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>TerraTec Mitarbeiter-Shop</h1>
+    <span id="kopfGuthaben" class="guthaben versteckt"></span>
+    <a id="adminLink" href="admin.html" class="versteckt"><button class="sekundaer klein" type="button">Verwaltung</button></a>
+    <button id="passwortBtn" class="sekundaer klein versteckt" type="button">Passwort ändern</button>
+    <button id="logoutBtn" class="sekundaer klein versteckt" type="button">Abmelden</button>
+  </header>
+
+  <main>
+    <div id="meldung" class="meldung"></div>
+
+    <!-- Login -->
+    <section id="loginAnsicht" class="card login-box versteckt">
+      <h2>Anmelden</h2>
+      <form id="loginForm">
+        <label for="loginEmail">E-Mail</label>
+        <input id="loginEmail" type="email" autocomplete="username" required>
+        <label for="loginPasswort">Passwort</label>
+        <input id="loginPasswort" type="password" autocomplete="current-password" required>
+        <button type="submit">Anmelden</button>
+      </form>
+    </section>
+
+    <!-- Shop -->
+    <section id="shopAnsicht" class="versteckt">
+      <div class="card">
+        <h2>Artikel</h2>
+        <div id="produkte" class="produkte"></div>
+      </div>
+
+      <div class="card">
+        <h2>Warenkorb</h2>
+        <div id="warenkorbInhalt"></div>
+        <p><strong>Summe: <span id="warenkorbSumme">€ 0,00</span></strong></p>
+        <button id="bestellenBtn" type="button">Verbindlich bestellen</button>
+      </div>
+
+      <div class="card">
+        <h2>Meine Bestellungen</h2>
+        <div id="meineBestellungen"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="passwortDialog">
+    <h2>Passwort ändern</h2>
+    <form id="passwortForm" method="dialog">
+      <div class="formzeile"><div>
+        <label for="pwAlt">Aktuelles Passwort</label>
+        <input id="pwAlt" type="password" autocomplete="current-password" required>
+      </div></div>
+      <div class="formzeile"><div>
+        <label for="pwNeu">Neues Passwort (mind. 8 Zeichen)</label>
+        <input id="pwNeu" type="password" autocomplete="new-password" minlength="8" required>
+      </div></div>
+      <button type="submit">Speichern</button>
+      <button type="button" class="sekundaer" id="pwAbbrechen">Abbrechen</button>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

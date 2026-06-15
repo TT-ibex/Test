@@ -1,3 +1,7 @@
+> **Hinweis:** Dieses Repository enthält zwei eigenständige Projekte:
+> 1. **PDF-Rechnungsauswertung** (dieses Dokument, Dateien im Hauptverzeichnis)
+> 2. **[TerraTec Mitarbeiter-Shop](mitarbeiter-shop/README.md)** – interner Shop, über den Mitarbeiter Fanshop-Artikel mit einem persönlichen Jahresguthaben bestellen können (Ordner `mitarbeiter-shop/`)
+
 # PDF-Rechnungsauswertung
 
 Eine Webseite, mit der bis zu **200 PDF-Rechnungen auf einmal** hochgeladen und ausgewertet werden können. Die Seite erkennt in jeder Rechnung die Artikelnummern, die zugehörigen Mengen und das Rechnungsdatum und zeigt am Ende eine Übersicht: **welche Menge von welchem Artikel in welchem Monat verrechnet wurde** (Tabelle Artikel × Monat, inkl. Summenzeile und CSV-Export).
