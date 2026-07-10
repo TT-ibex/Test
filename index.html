@@ -68,6 +68,12 @@
         </div>
       </div>
       <div class="field">
+        <label for="groupConfig">Produktgruppen für die Übersicht oben (<code>Name = Suchmuster</code>; eine Zeile <code>Summe</code> erzeugt eine Zwischensumme)</label>
+        <textarea id="groupConfig" rows="12" spellcheck="false"></textarea>
+        <p class="hint">Die Zuordnung erfolgt über die Produktbezeichnung (Groß-/Kleinschreibung egal, Leerzeichen um Bindestriche werden ignoriert). Pro Position zählt die erste passende Gruppe von oben.</p>
+        <p class="hint error" id="groupConfigError" hidden></p>
+      </div>
+      <div class="field">
         <label for="dateKeywords">Datums-Schlüsselwörter (Priorität bei der Monatszuordnung)</label>
         <input type="text" id="dateKeywords" value="Rechnungsdatum, Belegdatum, Leistungsdatum, Rechnung vom, Datum">
         <p class="hint">Es wird zuerst nach einem Datum neben diesen Begriffen gesucht; sonst gilt das erste gefundene Datum im Dokument. Unterstützte Formate: 31.12.2025, 31.12.25, 2025-12-31.</p>
@@ -82,6 +88,16 @@
       <span id="progressCount"></span>
     </div>
     <div class="progress-bar"><div id="progressFill"></div></div>
+  </section>
+
+  <!-- Ergebnis: Produktgruppen -->
+  <section id="groupSection" hidden>
+    <div class="section-header">
+      <h2>Produktgruppen pro Monat</h2>
+    </div>
+    <div class="table-wrap">
+      <table id="groupTable"></table>
+    </div>
   </section>
 
   <!-- Ergebnis: Pivot Artikel × Monat -->
