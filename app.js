@@ -67,6 +67,9 @@ const DEFAULT_GROUPS = [
   "Ino Ibex 165 = (?=.*\\bIno)(?=.*\\b(?:165|1[.,]65)(?!\\d))",
   "Ino Ibex 185 = (?=.*\\bIno)(?=.*\\b(?:185|1[.,]85)(?!\\d))",
   "Summe",
+  "AllroundMax = ^(?=.*Allround.?Max)(?!.*Flansch)(?!.*\\bFL\\b)",
+  "RockSTEP Trittbrett = ^(?=.*Rock.?Step)(?=.*Trittbrett)(?!.*Flansch)(?!.*\\bFL\\b)",
+  "Summe",
 ].join("\n");
 
 /* ---------- Zustand ---------- */
