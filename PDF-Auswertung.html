@@ -73,7 +73,7 @@ section { margin-bottom: 24px; }
 .settings-body { padding: 0 16px 16px; }
 .field { margin-bottom: 14px; }
 .field > label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; }
-.field input[type="text"], .field select {
+.field input[type="text"], .field select, .field textarea {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid #c4ced8;
@@ -81,6 +81,7 @@ section { margin-bottom: 24px; }
   font-size: 0.9rem;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
 }
+.field textarea { resize: vertical; }
 .field select { font-family: inherit; }
 .checkbox-field label { font-weight: 400; font-size: 0.9rem; }
 code { background: #eef1f4; padding: 1px 4px; border-radius: 4px; font-size: 0.85em; }
@@ -125,6 +126,7 @@ thead th {
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.desc { white-space: normal; min-width: 220px; max-width: 380px; }
 tr.total-row td { font-weight: 700; background: #f7f9fb; }
+tr.subtotal-row td { font-style: italic; font-weight: 600; background: #fbe9e0; }
 td.total-col, th.total-col { font-weight: 700; background: #fbfcfd; }
 
 .status-ok { color: #1a7f37; }
@@ -281,6 +283,12 @@ dialog::backdrop { background: rgba(20, 30, 40, .5); }
         </div>
       </div>
       <div class="field">
+        <label for="groupConfig">Produktgruppen für die Übersicht oben (<code>Name = Suchmuster</code>; eine Zeile <code>Summe</code> erzeugt eine Zwischensumme)</label>
+        <textarea id="groupConfig" rows="12" spellcheck="false"></textarea>
+        <p class="hint">Die Zuordnung erfolgt über die Produktbezeichnung (Groß-/Kleinschreibung egal, Leerzeichen um Bindestriche werden ignoriert). Pro Position zählt die erste passende Gruppe von oben.</p>
+        <p class="hint error" id="groupConfigError" hidden></p>
+      </div>
+      <div class="field">
         <label for="dateKeywords">Datums-Schlüsselwörter (Priorität bei der Monatszuordnung)</label>
         <input type="text" id="dateKeywords" value="Rechnungsdatum, Belegdatum, Leistungsdatum, Rechnung vom, Datum">
         <p class="hint">Es wird zuerst nach einem Datum neben diesen Begriffen gesucht; sonst gilt das erste gefundene Datum im Dokument. Unterstützte Formate: 31.12.2025, 31.12.25, 2025-12-31.</p>
@@ -295,6 +303,16 @@ dialog::backdrop { background: rgba(20, 30, 40, .5); }
       <span id="progressCount"></span>
     </div>
     <div class="progress-bar"><div id="progressFill"></div></div>
+  </section>
+
+  <!-- Ergebnis: Produktgruppen -->
+  <section id="groupSection" hidden>
+    <div class="section-header">
+      <h2>Produktgruppen pro Monat</h2>
+    </div>
+    <div class="table-wrap">
+      <table id="groupTable"></table>
+    </div>
   </section>
 
   <!-- Ergebnis: Pivot Artikel × Monat -->
@@ -381,6 +399,35 @@ const DEFAULT_POS_REGEX =
 const DEFAULT_ART_REGEX =
   "^\\s*Art\\.?\\s*-?\\s*Nr\\.?\\s*:?\\s*(?<artikel>.+?)(?:\\s+Rev\\b.*)?$";
 
+/* Standard-Produktgruppen: Zuordnung über die Produktbezeichnung.
+   Nur Grundgeräte-Zeilen zählen für G1–AX (Optionen erwähnen die Modelle
+   ebenfalls, enthalten aber nicht das Wort „Grundgerät“). */
+const DEFAULT_GROUPS = [
+  "G1 = Grundgerät.*Ibex.*\\bG1\\b",
+  "G2 = Grundgerät.*Ibex.*\\bG2\\b",
+  "G3 = Grundgerät.*Ibex.*\\bG3\\b(?!-V)",
+  "G3-V = Grundgerät.*Ibex.*G3-V",
+  "G4 = Grundgerät.*Ibex.*\\bG4\\b",
+  "AX = Grundgerät.*Ibex.*\\bAX\\b",
+  "Summe",
+  'LS Grip 12" = \\b12\\b.*LS.?Grip|LS.?Grip.*\\b12\\b',
+  'LS Grip 15" = \\b15\\b.*LS.?Grip|LS.?Grip.*\\b15\\b',
+  "Summe",
+  "Mähwerk 196 = Mähwerk.*\\b196\\b",
+  "Mähwerk 238 = Mähwerk.*\\b238\\b",
+  "Mähwerk 240 = Mähwerk.*\\b240\\b",
+  "Mähwerk 260 = Mähwerk.*\\b260\\b",
+  "Mähwerk 300 = Mähwerk.*\\b300\\b",
+  "Mähwerk 350 = Mähwerk.*\\b350\\b",
+  "Mähwerk 390 = Mähwerk.*\\b390\\b",
+  "Mähwerk 430 = Mähwerk.*\\b430\\b",
+  "Mähwerk 470 = Mähwerk.*\\b470\\b",
+  "Ino Ibex 145 = Ino.*\\b145\\b",
+  "Ino Ibex 165 = Ino.*\\b165\\b",
+  "Ino Ibex 185 = Ino.*\\b185\\b",
+  "Summe",
+].join("\n");
+
 /* ---------- Zustand ---------- */
 
 /** @type {Array<{name:string, status:string, message:string, date:Date|null, monthKey:string|null, lines:string[], items:Array<{artikel:string, menge:number, line:string}>}>} */
@@ -402,6 +449,8 @@ const posLineRegexInput = $("posLineRegex");
 const artLineRegexInput = $("artLineRegex");
 const posRegexError = $("posRegexError");
 const artRegexError = $("artRegexError");
+const groupConfigInput = $("groupConfig");
+const groupConfigError = $("groupConfigError");
 
 /* ---------- Initialisierung ---------- */
 
@@ -418,6 +467,11 @@ presetSelect.appendChild(custom);
 lineRegexInput.value = PRESETS[0].regex;
 posLineRegexInput.value = DEFAULT_POS_REGEX;
 artLineRegexInput.value = DEFAULT_ART_REGEX;
+groupConfigInput.value = DEFAULT_GROUPS;
+groupConfigInput.addEventListener("input", debounce(() => {
+  parseGroupConfig();
+  renderAll();
+}, 400));
 
 function currentMode() {
   return modeSelect.value === "singleline" ? "singleline" : "multiline";
@@ -800,6 +854,61 @@ function aggregate() {
   return { monthKeys, articles, perArticle, descByArticle };
 }
 
+/* Produktgruppen-Konfiguration parsen: "Name = Regex" bzw. "Summe"-Zeilen. */
+function parseGroupConfig() {
+  groupConfigError.hidden = true;
+  const defs = [];
+  const errors = [];
+  groupConfigInput.value.split("\n").forEach((raw, idx) => {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) return;
+    const eq = line.indexOf("=");
+    if (eq < 0) {
+      if (/^summe$/i.test(line)) {
+        defs.push({ type: "sum", name: "Summe" });
+      } else {
+        errors.push(`Zeile ${idx + 1}: „${line}“ – erwartet „Name = Suchmuster“ oder „Summe“.`);
+      }
+      return;
+    }
+    const name = line.slice(0, eq).trim();
+    const pattern = line.slice(eq + 1).trim();
+    try {
+      defs.push({ type: "group", name, re: new RegExp(pattern, "i") });
+    } catch (err) {
+      errors.push(`Zeile ${idx + 1} („${name}“): ungültiges Muster – ${err.message}`);
+    }
+  });
+  if (errors.length) {
+    groupConfigError.textContent = errors.join(" ");
+    groupConfigError.hidden = false;
+  }
+  return defs;
+}
+
+function normalizeForGroups(s) {
+  return String(s).replace(/\s*-\s*/g, "-").replace(/\s+/g, " ");
+}
+
+/* Summen pro Produktgruppe und Monat; pro Position zählt die erste passende Gruppe. */
+function aggregateGroups() {
+  const defs = parseGroupConfig();
+  const groups = defs.filter((d) => d.type === "group");
+  const sums = new Map(groups.map((g) => [g, new Map()]));
+  for (const r of fileResults) {
+    if (r.status === "err") continue;
+    const key = r.monthKey || NO_DATE;
+    for (const item of r.items) {
+      const text = normalizeForGroups(item.bezeichnung || item.artikel || "");
+      const g = groups.find((g) => g.re.test(text));
+      if (!g) continue;
+      const m = sums.get(g);
+      m.set(key, (m.get(key) || 0) + item.menge);
+    }
+  }
+  return { defs, sums };
+}
+
 const numFmt = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 3 });
 
 function monthLabel(key) {
@@ -809,8 +918,59 @@ function monthLabel(key) {
 }
 
 function renderAll() {
+  renderGroups();
   renderPivot();
   renderFiles();
+}
+
+function renderGroups() {
+  const { monthKeys } = aggregate();
+  const { defs, sums } = aggregateGroups();
+  const section = $("groupSection");
+  section.hidden = monthKeys.length === 0 || !defs.some((d) => d.type === "group");
+  if (section.hidden) return;
+
+  const table = $("groupTable");
+  table.innerHTML = "";
+
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  hr.appendChild(th("Produktgruppe"));
+  for (const mk of monthKeys) hr.appendChild(th(monthLabel(mk), "num"));
+  hr.appendChild(th("Gesamt", "num total-col"));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  let blockTotals = new Map();
+  for (const def of defs) {
+    const tr = document.createElement("tr");
+    if (def.type === "sum") {
+      tr.className = "subtotal-row";
+      tr.appendChild(td("Summe"));
+      let total = 0;
+      for (const mk of monthKeys) {
+        const v = blockTotals.get(mk) || 0;
+        total += v;
+        tr.appendChild(td(numFmt.format(v), "num"));
+      }
+      tr.appendChild(td(numFmt.format(total), "num total-col"));
+      blockTotals = new Map();
+    } else {
+      const row = sums.get(def);
+      tr.appendChild(td(def.name));
+      let total = 0;
+      for (const mk of monthKeys) {
+        const v = row.get(mk) || 0;
+        total += v;
+        blockTotals.set(mk, (blockTotals.get(mk) || 0) + v);
+        tr.appendChild(td(v ? numFmt.format(v) : "–", "num"));
+      }
+      tr.appendChild(td(total ? numFmt.format(total) : "–", "num total-col"));
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
 }
 
 function renderPivot() {
@@ -935,6 +1095,37 @@ function exportCsv() {
 
   const sep = ";";
   const rows = [];
+
+  // Produktgruppen-Block (wie in der Anzeige oben)
+  const { defs, sums } = aggregateGroups();
+  if (defs.some((d) => d.type === "group")) {
+    rows.push(["Produktgruppe", "", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
+    let blockTotals = new Map();
+    for (const def of defs) {
+      if (def.type === "sum") {
+        let total = 0;
+        const cells = monthKeys.map((mk) => {
+          const v = blockTotals.get(mk) || 0;
+          total += v;
+          return csvNum(v);
+        });
+        rows.push(["Summe", "", ...cells, csvNum(total)].join(sep));
+        blockTotals = new Map();
+      } else {
+        const row = sums.get(def);
+        let total = 0;
+        const cells = monthKeys.map((mk) => {
+          const v = row.get(mk) || 0;
+          total += v;
+          blockTotals.set(mk, (blockTotals.get(mk) || 0) + v);
+          return csvNum(v);
+        });
+        rows.push([csvCell(def.name), "", ...cells, csvNum(total)].join(sep));
+      }
+    }
+    rows.push("");
+  }
+
   rows.push(["Artikelnummer", "Bezeichnung", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
   for (const art of articles) {
     const row = perArticle.get(art);
