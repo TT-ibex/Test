@@ -47,21 +47,25 @@ const DEFAULT_GROUPS = [
   "G4 = Grundgerät.*Ibex.*\\bG4\\b",
   "AX = Grundgerät.*Ibex.*\\bAX\\b",
   "Summe",
-  'LS Grip 12" = \\b12\\b.*LS.?Grip|LS.?Grip.*\\b12\\b',
-  'LS Grip 15" = \\b15\\b.*LS.?Grip|LS.?Grip.*\\b15\\b',
+  'LS Grip 12" 2er Satz = (?=.*LS.?Grip)(?=.*\\b12\\b)(?=.*\\b2er)',
+  'LS Grip 12" 4er Satz = (?=.*LS.?Grip)(?=.*\\b12\\b)(?=.*\\b4er)',
+  'LS Grip 12" (ohne Satzangabe) = (?=.*LS.?Grip)(?=.*\\b12\\b)',
+  'LS Grip 15" 2er Satz = (?=.*LS.?Grip)(?=.*\\b15\\b)(?=.*\\b2er)',
+  'LS Grip 15" 4er Satz = (?=.*LS.?Grip)(?=.*\\b15\\b)(?=.*\\b4er)',
+  'LS Grip 15" (ohne Satzangabe) = (?=.*LS.?Grip)(?=.*\\b15\\b)',
   "Summe",
-  "Mähwerk 196 = Mähwerk.*\\b196\\b",
-  "Mähwerk 238 = Mähwerk.*\\b238\\b",
-  "Mähwerk 240 = Mähwerk.*\\b240\\b",
-  "Mähwerk 260 = Mähwerk.*\\b260\\b",
-  "Mähwerk 300 = Mähwerk.*\\b300\\b",
-  "Mähwerk 350 = Mähwerk.*\\b350\\b",
-  "Mähwerk 390 = Mähwerk.*\\b390\\b",
-  "Mähwerk 430 = Mähwerk.*\\b430\\b",
-  "Mähwerk 470 = Mähwerk.*\\b470\\b",
-  "Ino Ibex 145 = Ino.*\\b145\\b",
-  "Ino Ibex 165 = Ino.*\\b165\\b",
-  "Ino Ibex 185 = Ino.*\\b185\\b",
+  "Mähwerk 196 = (?=.*M\\S*hwerk)(?=.*\\b196)",
+  "Mähwerk 238 = (?=.*M\\S*hwerk)(?=.*\\b238)",
+  "Mähwerk 240 = (?=.*M\\S*hwerk)(?=.*\\b240)",
+  "Mähwerk 260 = (?=.*M\\S*hwerk)(?=.*\\b260)",
+  "Mähwerk 300 = (?=.*M\\S*hwerk)(?=.*\\b300)",
+  "Mähwerk 350 = (?=.*M\\S*hwerk)(?=.*\\b350)",
+  "Mähwerk 390 = (?=.*M\\S*hwerk)(?=.*\\b390)",
+  "Mähwerk 430 = (?=.*M\\S*hwerk)(?=.*\\b430)",
+  "Mähwerk 470 = (?=.*M\\S*hwerk)(?=.*\\b470)",
+  "Ino Ibex 145 = (?=.*\\bIno)(?=.*\\b145)",
+  "Ino Ibex 165 = (?=.*\\bIno)(?=.*\\b165)",
+  "Ino Ibex 185 = (?=.*\\bIno)(?=.*\\b185)",
   "Summe",
 ].join("\n");
 
@@ -258,6 +262,7 @@ function buildLines(items) {
       .sort((a, b) => a.x - b.x)
       .map((p) => p.str)
       .join(" ")
+      .normalize("NFC")
       .replace(/\s+/g, " ")
       .trim()
   );
@@ -524,7 +529,13 @@ function parseGroupConfig() {
 }
 
 function normalizeForGroups(s) {
-  return String(s).replace(/\s*-\s*/g, "-").replace(/\s+/g, " ");
+  return String(s).normalize("NFC").replace(/\s*-\s*/g, "-").replace(/\s+/g, " ");
+}
+
+/* Erste passende Gruppe für einen Text (für die Gruppen-Spalte in der Artikeltabelle). */
+function groupNameFor(text, groups) {
+  const g = groups.find((g) => g.re.test(normalizeForGroups(text)));
+  return g ? g.name : "";
 }
 
 /* Summen pro Produktgruppe und Monat; pro Position zählt die erste passende Gruppe. */
@@ -616,6 +627,7 @@ function renderPivot() {
   section.hidden = articles.length === 0;
   if (!articles.length) return;
 
+  const groups = parseGroupConfig().filter((d) => d.type === "group");
   const table = $("pivotTable");
   table.innerHTML = "";
 
@@ -623,6 +635,7 @@ function renderPivot() {
   const hr = document.createElement("tr");
   hr.appendChild(th("Artikelnummer"));
   hr.appendChild(th("Bezeichnung"));
+  hr.appendChild(th("Gruppe"));
   for (const mk of monthKeys) hr.appendChild(th(monthLabel(mk), "num"));
   hr.appendChild(th("Gesamt", "num total-col"));
   thead.appendChild(hr);
@@ -637,6 +650,7 @@ function renderPivot() {
     const tr = document.createElement("tr");
     tr.appendChild(td(art));
     tr.appendChild(td(descByArticle.get(art) || "", "desc"));
+    tr.appendChild(td(groupNameFor(descByArticle.get(art) || art, groups) || "–"));
     let rowTotal = 0;
     for (const mk of monthKeys) {
       const v = row.get(mk) || 0;
@@ -652,6 +666,7 @@ function renderPivot() {
   const totalTr = document.createElement("tr");
   totalTr.className = "total-row";
   totalTr.appendChild(td("Gesamt"));
+  totalTr.appendChild(td(""));
   totalTr.appendChild(td(""));
   for (const mk of monthKeys) totalTr.appendChild(td(numFmt.format(colTotals.get(mk) || 0), "num"));
   totalTr.appendChild(td(numFmt.format(grandTotal), "num total-col"));
@@ -735,8 +750,9 @@ function exportCsv() {
 
   // Produktgruppen-Block (wie in der Anzeige oben)
   const { defs, sums } = aggregateGroups();
-  if (defs.some((d) => d.type === "group")) {
-    rows.push(["Produktgruppe", "", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
+  const groups = defs.filter((d) => d.type === "group");
+  if (groups.length) {
+    rows.push(["Produktgruppe", "", "", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
     let blockTotals = new Map();
     for (const def of defs) {
       if (def.type === "sum") {
@@ -746,7 +762,7 @@ function exportCsv() {
           total += v;
           return csvNum(v);
         });
-        rows.push(["Summe", "", ...cells, csvNum(total)].join(sep));
+        rows.push(["Summe", "", "", ...cells, csvNum(total)].join(sep));
         blockTotals = new Map();
       } else {
         const row = sums.get(def);
@@ -757,13 +773,13 @@ function exportCsv() {
           blockTotals.set(mk, (blockTotals.get(mk) || 0) + v);
           return csvNum(v);
         });
-        rows.push([csvCell(def.name), "", ...cells, csvNum(total)].join(sep));
+        rows.push([csvCell(def.name), "", "", ...cells, csvNum(total)].join(sep));
       }
     }
     rows.push("");
   }
 
-  rows.push(["Artikelnummer", "Bezeichnung", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
+  rows.push(["Artikelnummer", "Bezeichnung", "Gruppe", ...monthKeys.map(monthLabel), "Gesamt"].join(sep));
   for (const art of articles) {
     const row = perArticle.get(art);
     let total = 0;
@@ -772,7 +788,13 @@ function exportCsv() {
       total += v;
       return csvNum(v);
     });
-    rows.push([csvCell(art), csvCell(descByArticle.get(art) || ""), ...cells, csvNum(total)].join(sep));
+    rows.push([
+      csvCell(art),
+      csvCell(descByArticle.get(art) || ""),
+      csvCell(groupNameFor(descByArticle.get(art) || art, groups)),
+      ...cells,
+      csvNum(total),
+    ].join(sep));
   }
 
   const blob = new Blob(["﻿" + rows.join("\r\n")], { type: "text/csv;charset=utf-8" });
